@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <title>Камера</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            font-family: Arial, sans-serif;
+        }
+
+        .container {
+            display: flex;
+            height: 100vh;
+            gap: 10px;
+            padding: 10px;
+        }
+
+        /* Левая колонка: видео + информация об объекте */
+        .camera-column {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            min-width: 0;
+        }
+
+        .camera {
+            position: relative;
+            height: 70%;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            overflow: hidden;
+            background: #000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .video-block {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .video-block img {
+            display: block;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            /* видео целиком, по центру, без обрезки */
+        }
+
+        /* Панель с информацией об объекте под видео */
+        .object-info {
+            flex: 1;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            background: #fff;
+            padding: 16px 20px;
+            overflow-y: auto;
+        }
+
+        .object-info h2 {
+            margin: 0 0 12px;
+            font-size: 18px;
+            color: #2c3e50;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .object-info h2 .badge {
+            font-size: 12px;
+            font-weight: normal;
+            padding: 2px 10px;
+            border-radius: 12px;
+            background: #eaf4ff;
+            color: #2c6fbb;
+        }
+
+        .object-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 10px 20px;
+        }
+
+        .object-field {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            padding: 8px 0;
+            border-bottom: 1px dashed #e6e6e6;
+        }
+
+        .object-field .label {
+            font-size: 12px;
+            color: #7f8c8d;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+
+        .object-field .value {
+            font-size: 15px;
+            color: #2c3e50;
+            font-weight: 500;
+            word-break: break-word;
+        }
+
+        .object-field .value.status-known {
+            color: #27ae60;
+        }
+
+        .object-field .value.status-unknown {
+            color: #e74c3c;
+        }
+
+        /* Правая колонка */
+        .sidebar {
+            width: 350px;
+            display: flex;
+            flex-direction: column;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            background: #fafafa;
+            overflow: hidden;
+            flex-shrink: 0;
+        }
+
+        .sidebar-header {
+            padding: 12px 16px;
+            background: #2c3e50;
+            color: #fff;
+            font-size: 16px;
+            font-weight: bold;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .sidebar-header .count {
+            background: #3498db;
+            border-radius: 12px;
+            padding: 2px 10px;
+            font-size: 13px;
+        }
+
+        .faces-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+        }
+
+        .face-item {
+            display: flex;
+            align-items: center;
+            padding: 10px;
+            margin-bottom: 8px;
+            background: #fff;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            transition: background 0.2s;
+        }
+
+        .face-item:hover {
+            background: #f0f7ff;
+        }
+
+        .face-avatar {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            background: #3498db;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            font-weight: bold;
+            margin-right: 12px;
+            flex-shrink: 0;
+            background-size: cover;
+            background-position: center;
+        }
+
+        .face-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .face-name {
+            font-weight: bold;
+            color: #2c3e50;
+            margin-bottom: 4px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .face-meta {
+            font-size: 12px;
+            color: #7f8c8d;
+        }
+
+        .face-confidence {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 11px;
+            font-weight: bold;
+            margin-top: 4px;
+        }
+
+        .confidence-high {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .confidence-medium {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .confidence-low {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .empty-state {
+            text-align: center;
+            color: #95a5a6;
+            padding: 40px 20px;
+            font-size: 14px;
+        }
+
+        .empty-state .icon {
+            font-size: 48px;
+            margin-bottom: 10px;
+            opacity: 0.5;
+        }
+
+        .face-item.unknown {
+            border-left: 4px solid #e74c3c;
+        }
+
+        .face-item.known {
+            border-left: 4px solid #27ae60;
+        }
+
+        .timestamp {
+            font-size: 11px;
+            color: #95a5a6;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <!-- Левая колонка: видео + информация об объекте -->
+        <div class="camera-column">
+            <div class="camera">
+                <div class="video-block">
+                    <img id="video" alt="Видеопоток">
+                </div>
+            </div>
+
+            <!-- Блок с информацией об объекте -->
+            <div class="object-info" id="objectInfo">
+                <h2>
+                    Информация об объекте
+                    <span class="badge" id="objectStatusBadge">—</span>
+                </h2>
+                <div class="object-grid" id="objectGrid">
+                    <div class="object-field">
+                        <span class="label">Идентификация</span>
+                        <span class="value" id="objName">—</span>
+                    </div>
+                    <div class="object-field">
+                        <span class="label">Пол</span>
+                        <span class="value" id="objGender">—</span>
+                    </div>
+                    <div class="object-field">
+                        <span class="label">Возраст (оценка)</span>
+                        <span class="value" id="objAge">—</span>
+                    </div>
+                    <div class="object-field">
+                        <span class="label">Уверенность детектора</span>
+                        <span class="value" id="objConfidence">—</span>
+                    </div>
+                    <div class="object-field">
+                        <span class="label">Ориентация головы</span>
+                        <span class="value" id="objPose">—</span>
+                    </div>
+                    <div class="object-field">
+                        <span class="label">Время обнаружения</span>
+                        <span class="value" id="objTime">—</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Правая колонка: список распознанных лиц -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <span>Распознанные лица</span>
+                <span class="count" id="faceCount">0</span>
+            </div>
+            <div class="faces-list" id="facesList">
+                <div class="empty-state" id="emptyState">
+                    <div class="icon">👤</div>
+                    <div>Лица пока не обнаружены</div>
+                </div>
+            </div>
+        </aside>
+    </div>
+
+    <script>
+        const ws = new WebSocket('ws://localhost:8765');
+        const img = document.getElementById('video');
+        ws.onmessage = (event) => { img.src = event.data; };
+    </script>
+
+</body>
+
+</html>
