@@ -59,7 +59,6 @@ def create_db(db_path: str = DB_PATH) -> None:
 
     print(f"✅ База данных создана: {db_path}")
 
-
 # ---------- Пользователи ----------
 
 def add_user(
@@ -81,6 +80,19 @@ def add_user(
         )
         return cur.lastrowid
 
+def get_user(user_id):
+    with get_conn() as conn:
+        cur = conn.execute("SELECT id_tg, first_name, last_name, username, phone_number, telegram_link FROM users WHERE id = ?", (user_id,))
+        return cur.fetchall()
+
+
+def delete_user(user_id: int) -> bool:
+    with get_conn() as conn:
+        conn.execute("DELETE FROM photos WHERE user_id = ?", (user_id,))
+        cur = conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        conn.commit()
+        return cur.rowcount > 0
+
 # ---------- Фото ----------
 
 def add_photo(path: str, user_id: int, embedding) -> int:
@@ -91,3 +103,16 @@ def add_photo(path: str, user_id: int, embedding) -> int:
             (path, user_id, embedding),
         )
         return cur.lastrowid
+
+def get_all_photo():
+    """Возвращает список всех фото."""
+    with get_conn() as conn:
+        cur = conn.execute("SELECT id, path, user_id, embedding FROM photos")
+        return cur.fetchall()
+
+def get_photo(user_id):
+    with get_conn() as conn:
+        cur = conn.execute("SELECT path FROM photos WHERE user_id = ?", (user_id,))
+        row = cur.fetchone()
+        return row["path"] if row else None
+    

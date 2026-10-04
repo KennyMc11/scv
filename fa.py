@@ -2,6 +2,7 @@ import os
 import cv2
 import numpy as np
 from insightface.app import FaceAnalysis
+from db import add_user, add_photo, get_all_photo
 
 # Инициализация модели (один раз при старте программы)
 app = FaceAnalysis(name='buffalo_l', providers=['CPUExecutionProvider'])
@@ -14,21 +15,8 @@ def cosine_similarity(emb1, emb2):
 
 
 def find_same_person(reference_path, folder_path, threshold=0.5, verbose=True):
-    """
-    Сравнивает эталонное фото с фото из папки и возвращает те, где тот же человек.
 
-    :param reference_path: путь к эталонному фото
-    :param folder_path: путь к папке с фото для сравнения
-    :param threshold: порог косинусной близости (обычно 0.4–0.6)
-    :param verbose: печатать ли прогресс
-    :return: список кортежей (путь_к_файлу, схожесть)
-    """
-    # 1. Загружаем эталонное фото
-    ref_img = cv2.imread(reference_path)
-    if ref_img is None:
-        raise FileNotFoundError(f"Не удалось открыть эталонное фото: {reference_path}")
-
-    ref_faces = app.get(ref_img)
+    ref_faces = app.get(faces)
     if not ref_faces:
         raise ValueError(f"На эталонном фото не найдено лиц: {reference_path}")
 
@@ -79,6 +67,18 @@ def find_same_person(reference_path, folder_path, threshold=0.5, verbose=True):
     # 3. Сортируем по убыванию схожести
     matches.sort(key=lambda x: x[1], reverse=True)
     return matches
+
+
+def find_same_emb(ref_emb, threshold=0.5):
+    all_bd = get_all_photo()
+    for el in all_bd:
+        emb = np.frombuffer(el['embedding'], dtype=np.float32)
+        cos_sim = cosine_similarity(ref_emb, emb)
+        if cos_sim >= threshold:
+            return el['user_id']
+    return None
+
+
 
 if __name__ == "__main__":
     results = find_same_person(

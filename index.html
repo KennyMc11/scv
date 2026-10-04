@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="ru">
 
 <head>
     <meta charset="utf-8">
@@ -24,7 +24,6 @@
             padding: 10px;
         }
 
-        /* Левая колонка: видео + информация об объекте */
         .camera-column {
             flex: 1;
             display: flex;
@@ -35,7 +34,7 @@
 
         .camera {
             position: relative;
-            height: 70%;
+            height: 65%;
             border: 1px solid #ccc;
             border-radius: 6px;
             overflow: hidden;
@@ -58,10 +57,8 @@
             width: 100%;
             height: 100%;
             object-fit: contain;
-            /* видео целиком, по центру, без обрезки */
         }
 
-        /* Панель с информацией об объекте под видео */
         .object-info {
             flex: 1;
             border: 1px solid #ccc;
@@ -125,7 +122,6 @@
             color: #e74c3c;
         }
 
-        /* Правая колонка */
         .sidebar {
             width: 350px;
             display: flex;
@@ -176,6 +172,14 @@
             background: #f0f7ff;
         }
 
+        .face-item.unknown {
+            border-left: 4px solid #e74c3c;
+        }
+
+        .face-item.known {
+            border-left: 4px solid #27ae60;
+        }
+
         .face-avatar {
             width: 48px;
             height: 48px;
@@ -210,6 +214,11 @@
         .face-meta {
             font-size: 12px;
             color: #7f8c8d;
+        }
+
+        .face-meta a {
+            color: #2c6fbb;
+            text-decoration: none;
         }
 
         .face-confidence {
@@ -249,24 +258,27 @@
             opacity: 0.5;
         }
 
-        .face-item.unknown {
-            border-left: 4px solid #e74c3c;
+        .status-dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 6px;
         }
 
-        .face-item.known {
-            border-left: 4px solid #27ae60;
+        .status-dot.online {
+            background: #27ae60;
         }
 
-        .timestamp {
-            font-size: 11px;
-            color: #95a5a6;
+        .status-dot.offline {
+            background: #e74c3c;
         }
     </style>
 </head>
 
 <body>
     <div class="container">
-        <!-- Левая колонка: видео + информация об объекте -->
+        <!-- Левая колонка -->
         <div class="camera-column">
             <div class="camera">
                 <div class="video-block">
@@ -274,13 +286,12 @@
                 </div>
             </div>
 
-            <!-- Блок с информацией об объекте -->
             <div class="object-info" id="objectInfo">
                 <h2>
                     Информация об объекте
                     <span class="badge" id="objectStatusBadge">—</span>
                 </h2>
-                <div class="object-grid" id="objectGrid">
+                <div class="object-grid">
                     <div class="object-field">
                         <span class="label">Идентификация</span>
                         <span class="value" id="objName">—</span>
@@ -298,21 +309,32 @@
                         <span class="value" id="objConfidence">—</span>
                     </div>
                     <div class="object-field">
-                        <span class="label">Ориентация головы</span>
-                        <span class="value" id="objPose">—</span>
+                        <span class="label">Фото</span>
+                        <span class="value" id="objPhoto">—</span>
                     </div>
                     <div class="object-field">
                         <span class="label">Время обнаружения</span>
                         <span class="value" id="objTime">—</span>
                     </div>
+                    <div class="object-field">
+                        <span class="label">Telegram</span>
+                        <span class="value" id="objTelegram">—</span>
+                    </div>
+                    <div class="object-field">
+                        <span class="label">Телефон</span>
+                        <span class="value" id="objPhone">—</span>
+                    </div>
                 </div>
             </div>
         </div>
 
-        <!-- Правая колонка: список распознанных лиц -->
+        <!-- Правая колонка -->
         <aside class="sidebar">
             <div class="sidebar-header">
-                <span>Распознанные лица</span>
+                <span>
+                    <span class="status-dot offline" id="wsStatus"></span>
+                    Распознанные лица
+                </span>
                 <span class="count" id="faceCount">0</span>
             </div>
             <div class="faces-list" id="facesList">
@@ -325,11 +347,219 @@
     </div>
 
     <script>
-        const ws = new WebSocket('ws://localhost:8765');
-        const img = document.getElementById('video');
-        ws.onmessage = (event) => { img.src = event.data; };
-    </script>
+        const els = {
+            img: document.getElementById('video'),
+            facesList: document.getElementById('facesList'),
+            faceCount: document.getElementById('faceCount'),
+            wsStatus: document.getElementById('wsStatus'),
+            objName: document.getElementById('objName'),
+            objGender: document.getElementById('objGender'),
+            objAge: document.getElementById('objAge'),
+            objConfidence: document.getElementById('objConfidence'),
+            objPhoto: document.getElementById('objPhoto'),
+            objTime: document.getElementById('objTime'),
+            objTelegram: document.getElementById('objTelegram'),
+            objPhone: document.getElementById('objPhone'),
+            objBadge: document.getElementById('objectStatusBadge'),
+        };
 
+        let ws = null;
+        let reconnectTimer = null;
+
+        function connect() {
+            ws = new WebSocket('ws://localhost:8765');
+
+            ws.onopen = () => {
+                console.log('WS подключён');
+                els.wsStatus.classList.remove('offline');
+                els.wsStatus.classList.add('online');
+                if (reconnectTimer) {
+                    clearTimeout(reconnectTimer);
+                    reconnectTimer = null;
+                }
+            };
+
+            ws.onclose = () => {
+                console.warn('WS отключён, переподключение через 2с');
+                els.wsStatus.classList.remove('online');
+                els.wsStatus.classList.add('offline');
+                if (!reconnectTimer) {
+                    reconnectTimer = setTimeout(connect, 2000);
+                }
+            };
+
+            ws.onerror = (e) => console.error('WS ошибка:', e);
+
+            ws.onmessage = (event) => {
+                let msg;
+                try { msg = JSON.parse(event.data); }
+                catch (e) { console.warn('Не JSON:', event.data); return; }
+
+                if (msg.type === 'frame') {
+                    handleFrame(msg);
+                } else if (msg.type === 'error') {
+                    console.error('Сервер:', msg.msg);
+                }
+            };
+        }
+
+        function handleFrame(msg) {
+            // 1. Видео
+            if (msg.image) els.img.src = msg.image;
+
+            // 2. Объединяем известные и неизвестные лица
+            const known = msg.faces_known || [];
+            const unknown = msg.faces_unknown || [];
+
+            // 3. Список лиц в сайдбаре
+            renderFacesList(known, unknown);
+
+            // 4. Панель "Информация об объекте"
+            renderObjectInfo(known, unknown);
+        }
+
+        function renderFacesList(known, unknown) {
+            const total = known.length + unknown.length;
+            els.faceCount.textContent = total;
+
+            if (total === 0) {
+                els.facesList.innerHTML = `
+                    <div class="empty-state">
+                        <div class="icon">👤</div>
+                        <div>Лица пока не обнаружены</div>
+                    </div>`;
+                return;
+            }
+
+            const html = [
+                ...known.map(f => renderFaceItem(f, true)),
+                ...unknown.map(f => renderFaceItem(f, false)),
+            ].join('');
+            els.facesList.innerHTML = html;
+        }
+
+        function renderFaceItem(f, isKnown) {
+            const confidenceClass =
+                f.score > 0.7 ? 'confidence-high' :
+                    f.score > 0.5 ? 'confidence-medium' : 'confidence-low';
+
+            // Аватар: фото известного или буква пола
+            let avatarStyle = '';
+            let avatarContent = f.gender;
+            if (isKnown && f.photo) {
+                avatarStyle = `background-image:url('${f.photo}'); color:transparent;`;
+                avatarContent = '';
+            }
+
+            // Заголовок
+            let title;
+            if (isKnown) {
+                const name = [f.last_name, f.first_name].filter(Boolean).join(' ') || 'Без имени';
+                title = `${name} (${f.gender}, ${f.age})`;
+            } else {
+                title = `Неизвестный (${f.gender}, ${f.age})`;
+            }
+
+            // Доп. строка
+            let meta = '';
+            if (isKnown) {
+                if (f.username) meta += `@${f.username} `;
+                if (f.phone_number) meta += `· ${f.phone_number}`;
+                meta += `<br>bbox: ${f.bbox.join(', ')}`;
+            } else {
+                meta = `bbox: ${f.bbox.join(', ')}`;
+            }
+
+            return `
+                <div class="face-item ${isKnown ? 'known' : 'unknown'}">
+                    <div class="face-avatar" style="${avatarStyle}">${avatarContent}</div>
+                    <div class="face-info">
+                        <div class="face-name">${escapeHtml(title)}</div>
+                        <div class="face-meta">${meta}</div>
+                        <span class="face-confidence ${confidenceClass}">
+                            ${(f.score * 100).toFixed(1)}%
+                        </span>
+                    </div>
+                </div>`;
+        }
+
+        function renderObjectInfo(known, unknown) {
+            // Главный объект: сначала известные, среди них самое уверенное;
+            // иначе самое уверенное среди неизвестных.
+            const pool = known.length ? known : unknown;
+            if (!pool.length) {
+                setObjField('objName', '—');
+                setObjField('objGender', '—');
+                setObjField('objAge', '—');
+                setObjField('objConfidence', '—');
+                setObjField('objPhoto', '—');
+                setObjField('objTime', '—');
+                setObjField('objTelegram', '—');
+                setObjField('objPhone', '—');
+                els.objBadge.textContent = '—';
+                els.objName.className = 'value';
+                return;
+            }
+
+            const main = pool.slice().sort((a, b) => b.score - a.score)[0];
+            const isKnown = known.includes(main);
+
+            if (isKnown) {
+                const name = [main.last_name, main.first_name].filter(Boolean).join(' ') || '—';
+                setObjField('objName', name);
+                els.objName.className = 'value status-known';
+                els.objBadge.textContent = 'опознан';
+
+                // Фото — маленькая превьюшка
+                if (main.photo) {
+                    els.objPhoto.innerHTML =
+                        `<img src="${main.photo}" alt="фото" style="max-height:80px;border-radius:4px;">`;
+                } else {
+                    els.objPhoto.textContent = '—';
+                }
+
+                // Telegram
+                if (main.telegram_link) {
+                    els.objTelegram.innerHTML =
+                        `<a href="${main.telegram_link}" target="_blank" rel="noopener">${main.telegram_link}</a>`;
+                } else if (main.username) {
+                    els.objTelegram.innerHTML =
+                        `<a href="https://t.me/${main.username}" target="_blank" rel="noopener">@${main.username}</a>`;
+                } else {
+                    els.objTelegram.textContent = '—';
+                }
+
+                setObjField('objPhone', main.phone_number || '—');
+            } else {
+                setObjField('objName', 'Неизвестный');
+                els.objName.className = 'value status-unknown';
+                els.objBadge.textContent = 'не опознан';
+                setObjField('objPhoto', '—');
+                setObjField('objTelegram', '—');
+                setObjField('objPhone', '—');
+            }
+
+            setObjField('objGender', main.gender);
+            setObjField('objAge', main.age);
+            setObjField('objConfidence', (main.score * 100).toFixed(1) + '%');
+            setObjField('objTime', new Date().toLocaleTimeString());
+        }
+
+        function setObjField(id, value) {
+            els[id].textContent = value;
+        }
+
+        function escapeHtml(s) {
+            return String(s)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        connect();
+    </script>
 </body>
 
 </html>
