@@ -144,6 +144,17 @@
             align-items: center;
         }
 
+        .sidebar-header1 {
+            padding: 12px 16px;
+            background: #2c3e50;
+            color: #fff;
+            font-size: 16px;
+            font-weight: bold;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
         .sidebar-header .count {
             background: #3498db;
             border-radius: 12px;
@@ -152,6 +163,12 @@
         }
 
         .faces-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+        }
+
+        .faces-list1 {
             flex: 1;
             overflow-y: auto;
             padding: 10px;
@@ -178,6 +195,15 @@
 
         .face-item.known {
             border-left: 4px solid #27ae60;
+        }
+
+        .face-item.fresh {
+            box-shadow: 0 0 0 2px #27ae60 inset;
+        }
+
+        .face-item.selected {
+            background: #eaf4ff;
+            box-shadow: 0 0 0 1px #3498db inset;
         }
 
         .face-avatar {
@@ -252,7 +278,20 @@
             font-size: 14px;
         }
 
+        .empty-state1 {
+            text-align: center;
+            color: #95a5a6;
+            padding: 40px 20px;
+            font-size: 14px;
+        }
+
         .empty-state .icon {
+            font-size: 48px;
+            margin-bottom: 10px;
+            opacity: 0.5;
+        }
+
+        .empty-state1 .icon {
             font-size: 48px;
             margin-bottom: 10px;
             opacity: 0.5;
@@ -330,17 +369,34 @@
 
         <!-- Правая колонка -->
         <aside class="sidebar">
-            <div class="sidebar-header">
-                <span>
-                    <span class="status-dot offline" id="wsStatus"></span>
-                    Распознанные лица
-                </span>
-                <span class="count" id="faceCount">0</span>
+            <div class="sidebar-section sidebar-top">
+                <div class="sidebar-header">
+                    <span>
+                        <span class="status-dot offline" id="wsStatus"></span>
+                        Объекты в кадре
+                    </span>
+                    <span class="count" id="faceCount">0</span>
+                </div>
+                <div class="faces-list" id="facesList">
+                    <div class="empty-state" id="emptyState">
+                        <div class="icon">👤</div>
+                        <div>Лица пока не обнаружены</div>
+                    </div>
+                </div>
             </div>
-            <div class="faces-list" id="facesList">
-                <div class="empty-state" id="emptyState">
-                    <div class="icon">👤</div>
-                    <div>Лица пока не обнаружены</div>
+            <div class="sidebar-section sidebar-bottom">
+                <div class="sidebar-header">
+                    <span>
+                        <span class="status-dot offline" id="wsStatus1"></span>
+                        Распознанные лица
+                    </span>
+                    <span class="count" id="faceCount1">0</span>
+                </div>
+                <div class="faces-list" id="facesList1">
+                    <div class="empty-state" id="emptyState1">
+                        <div class="icon">👤</div>
+                        <div>Лица пока не обнаружены</div>
+                    </div>
                 </div>
             </div>
         </aside>
@@ -361,18 +417,32 @@
             objTelegram: document.getElementById('objTelegram'),
             objPhone: document.getElementById('objPhone'),
             objBadge: document.getElementById('objectStatusBadge'),
+            facesList1: document.getElementById('facesList1'),
+            faceCount1: document.getElementById('faceCount1'),
+            wsStatus1: document.getElementById('wsStatus1'),
         };
 
         let ws = null;
         let reconnectTimer = null;
+
+        // Выбранный объект: стабильный ключ + сохранённые данные
+        let selectedKey = null;      // строка-ключ: "id:123" или "bbox:10,20,30,40"
+        let selectedFace = null;
+        let selectedIsKnown = false;
+
+        // Кэш последних отрисованных данных, чтобы не перерисовывать зря
+        let lastFacesKey = '';
+        let lastKnownKey = '';
 
         function connect() {
             ws = new WebSocket('ws://localhost:8765');
 
             ws.onopen = () => {
                 console.log('WS подключён');
-                els.wsStatus.classList.remove('offline');
-                els.wsStatus.classList.add('online');
+                [els.wsStatus, els.wsStatus1].forEach(el => {
+                    el.classList.remove('offline');
+                    el.classList.add('online');
+                });
                 if (reconnectTimer) {
                     clearTimeout(reconnectTimer);
                     reconnectTimer = null;
@@ -381,8 +451,10 @@
 
             ws.onclose = () => {
                 console.warn('WS отключён, переподключение через 2с');
-                els.wsStatus.classList.remove('online');
-                els.wsStatus.classList.add('offline');
+                [els.wsStatus, els.wsStatus1].forEach(el => {
+                    el.classList.remove('online');
+                    el.classList.add('offline');
+                });
                 if (!reconnectTimer) {
                     reconnectTimer = setTimeout(connect, 2000);
                 }
@@ -403,19 +475,68 @@
             };
         }
 
+        // Стабильный ключ для лица
+        function faceKey(f, isKnown) {
+            if (isKnown && f.id != null) return 'id:' + f.id;
+            // для неизвестных — округляем bbox до 20px, чтобы сгладить дрожание детектора
+            if (f.bbox) {
+                const b = f.bbox.map(v => Math.round(v / 20) * 20);
+                return 'bbox:' + b.join(',');
+            }
+            return 'anon:' + Math.random();
+        }
+
         function handleFrame(msg) {
-            // 1. Видео
             if (msg.image) els.img.src = msg.image;
 
-            // 2. Объединяем известные и неизвестные лица
             const known = msg.faces_known || [];
             const unknown = msg.faces_unknown || [];
+            const knownAll = msg.faces_known_all || [];
 
-            // 3. Список лиц в сайдбаре
-            renderFacesList(known, unknown);
+            // --- Верхний список: лица в кадре ---
+            const facesKey = JSON.stringify([
+                known.map(f => faceKey(f, true)),
+                unknown.map(f => faceKey(f, false)),
+            ]);
+            if (facesKey !== lastFacesKey) {
+                lastFacesKey = facesKey;
+                renderFacesList(known, unknown);
+            }
 
-            // 4. Панель "Информация об объекте"
-            renderObjectInfo(known, unknown);
+            // --- Нижний список: накопленные ---
+            const knownKey = JSON.stringify(knownAll.map(f => faceKey(f, true)));
+            if (knownKey !== lastKnownKey) {
+                lastKnownKey = knownKey;
+                renderKnownFacesList(knownAll);
+            }
+
+            // --- Обновление выбранного объекта ---
+            if (selectedKey) {
+                // ищем по стабильному ключу
+                let found = null, isKnown = false;
+                for (const f of known) {
+                    if (faceKey(f, true) === selectedKey) { found = f; isKnown = true; break; }
+                }
+                if (!found) {
+                    for (const f of unknown) {
+                        if (faceKey(f, false) === selectedKey) { found = f; isKnown = false; break; }
+                    }
+                }
+                if (!found) {
+                    for (const f of knownAll) {
+                        if (faceKey(f, true) === selectedKey) { found = f; isKnown = true; break; }
+                    }
+                }
+                if (found) {
+                    selectedFace = found;
+                    selectedIsKnown = isKnown;
+                    renderObjectInfoFromFace(found, isKnown);
+                }
+                // если не найден — оставляем последние данные в панели
+            } else {
+                // ничего не выбрано — показываем основное лицо
+                renderObjectInfo(known, unknown);
+            }
         }
 
         function renderFacesList(known, unknown) {
@@ -436,6 +557,155 @@
                 ...unknown.map(f => renderFaceItem(f, false)),
             ].join('');
             els.facesList.innerHTML = html;
+
+            // Восстанавливаем выделение
+            restoreSelection(els.facesList, known, unknown);
+        }
+
+        function renderKnownFacesList(items) {
+            els.faceCount1.textContent = items.length;
+            if (!items.length) {
+                els.facesList1.innerHTML = `
+                    <div class="empty-state1">
+                        <div class="icon">👤</div>
+                        <div>Распознанные лица появятся здесь</div>
+                    </div>`;
+                return;
+            }
+            els.facesList1.innerHTML = items.map(f => renderFaceItem(f, true)).join('');
+
+            // Восстанавливаем выделение
+            restoreSelection(els.facesList1, items, []);
+        }
+
+        function restoreSelection(container, known, unknown) {
+            if (!selectedKey) return;
+            const items = container.querySelectorAll('.face-item');
+            let idx = 0;
+            for (const f of known) {
+                if (faceKey(f, true) === selectedKey) {
+                    items[idx]?.classList.add('selected');
+                    return;
+                }
+                idx++;
+            }
+            for (const f of unknown) {
+                if (faceKey(f, false) === selectedKey) {
+                    items[idx]?.classList.add('selected');
+                    return;
+                }
+                idx++;
+            }
+        }
+
+        // --- Делегирование событий: один обработчик на контейнер ---
+        function handleListClick(e, known, unknown) {
+            const item = e.target.closest('.face-item');
+            if (!item) return;
+
+            const items = Array.from(item.parentElement.querySelectorAll('.face-item'));
+            const index = items.indexOf(item);
+
+            let face, isKnown;
+            if (index < known.length) {
+                face = known[index];
+                isKnown = true;
+            } else {
+                face = unknown[index - known.length];
+                isKnown = false;
+            }
+            if (!face) return;
+
+            // Снимаем выделение со всех в обоих списках
+            document.querySelectorAll('.face-item.selected').forEach(el => el.classList.remove('selected'));
+            item.classList.add('selected');
+
+            selectedKey = faceKey(face, isKnown);
+            selectedFace = face;
+            selectedIsKnown = isKnown;
+
+            renderObjectInfoFromFace(face, isKnown);
+        }
+
+        // Навешиваем делегирование один раз — при загрузке
+        els.facesList.addEventListener('click', (e) => {
+            // берём актуальные данные из последнего кадра
+            const data = lastFrameData;
+            if (!data) return;
+            handleListClick(e, data.known, data.unknown);
+        });
+        els.facesList1.addEventListener('click', (e) => {
+            const data = lastFrameData;
+            if (!data) return;
+            handleListClick(e, data.knownAll, []);
+        });
+
+        // Храним последние данные кадра для обработчиков клика
+        let lastFrameData = null;
+
+        // Переопределяем handleFrame, чтобы сохранять данные
+        const _origHandleFrame = handleFrame;
+        handleFrame = function (msg) {
+            lastFrameData = {
+                known: msg.faces_known || [],
+                unknown: msg.faces_unknown || [],
+                knownAll: msg.faces_known_all || [],
+            };
+            _origHandleFrame(msg);
+        };
+
+        function renderObjectInfoFromFace(face, isKnown) {
+            if (isKnown) {
+                const name = [face.last_name, face.first_name].filter(Boolean).join(' ') || '—';
+                setObjField('objName', name);
+                els.objName.className = 'value status-known';
+                els.objBadge.textContent = 'опознан';
+
+                if (face.photo) {
+                    els.objPhoto.innerHTML =
+                        `<img src="${face.photo}" alt="фото" style="max-height:80px;border-radius:4px;">`;
+                } else {
+                    els.objPhoto.textContent = '—';
+                }
+
+                if (face.telegram_link) {
+                    els.objTelegram.innerHTML =
+                        `<a href="${face.telegram_link}" target="_blank" rel="noopener">${face.telegram_link}</a>`;
+                } else if (face.username) {
+                    els.objTelegram.innerHTML =
+                        `<a href="https://t.me/${face.username}" target="_blank" rel="noopener">@${face.username}</a>`;
+                } else {
+                    els.objTelegram.textContent = '—';
+                }
+
+                setObjField('objPhone', face.phone_number || '—');
+            } else {
+                setObjField('objName', 'Неизвестный');
+                els.objName.className = 'value status-unknown';
+                els.objBadge.textContent = 'не опознан';
+                setObjField('objPhoto', '—');
+                setObjField('objTelegram', '—');
+                setObjField('objPhone', '—');
+            }
+
+            setObjField('objGender', face.gender);
+            setObjField('objAge', face.age);
+            setObjField('objConfidence', (face.score * 100).toFixed(1) + '%');
+            setObjField('objTime', face.lastSeen ? formatTime(face.lastSeen) : new Date().toLocaleTimeString());
+        }
+
+        function formatTime(ms) {
+            if (!ms) return '—';
+            const d = new Date(ms);
+            return d.toLocaleTimeString('ru-RU', { hour12: false });
+        }
+
+        function formatAgo(ms) {
+            if (!ms) return '';
+            const sec = Math.max(0, Math.round((Date.now() - ms) / 1000));
+            if (sec < 60) return `${sec} с назад`;
+            const min = Math.round(sec / 60);
+            return `${min} мин назад`;
         }
 
         function renderFaceItem(f, isKnown) {
@@ -443,7 +713,9 @@
                 f.score > 0.7 ? 'confidence-high' :
                     f.score > 0.5 ? 'confidence-medium' : 'confidence-low';
 
-            // Аватар: фото известного или буква пола
+            const isFresh = isKnown && f.lastSeen && (Date.now() - f.lastSeen < 3000);
+            const freshClass = isFresh ? ' fresh' : '';
+
             let avatarStyle = '';
             let avatarContent = f.gender;
             if (isKnown && f.photo) {
@@ -451,7 +723,6 @@
                 avatarContent = '';
             }
 
-            // Заголовок
             let title;
             if (isKnown) {
                 const name = [f.last_name, f.first_name].filter(Boolean).join(' ') || 'Без имени';
@@ -460,18 +731,18 @@
                 title = `Неизвестный (${f.gender}, ${f.age})`;
             }
 
-            // Доп. строка
             let meta = '';
             if (isKnown) {
                 if (f.username) meta += `@${f.username} `;
-                if (f.phone_number) meta += `· ${f.phone_number}`;
-                meta += `<br>bbox: ${f.bbox.join(', ')}`;
+                if (f.phone_number) meta += `· ${f.phone_number} `;
+                const t = formatTime(f.lastSeen);
+                meta += `<br>Обнаружен: ${t}`;
             } else {
                 meta = `bbox: ${f.bbox.join(', ')}`;
             }
 
             return `
-                <div class="face-item ${isKnown ? 'known' : 'unknown'}">
+                <div class="face-item ${isKnown ? 'known' : 'unknown'}${freshClass}">
                     <div class="face-avatar" style="${avatarStyle}">${avatarContent}</div>
                     <div class="face-info">
                         <div class="face-name">${escapeHtml(title)}</div>
@@ -484,8 +755,6 @@
         }
 
         function renderObjectInfo(known, unknown) {
-            // Главный объект: сначала известные, среди них самое уверенное;
-            // иначе самое уверенное среди неизвестных.
             const pool = known.length ? known : unknown;
             if (!pool.length) {
                 setObjField('objName', '—');
@@ -503,46 +772,7 @@
 
             const main = pool.slice().sort((a, b) => b.score - a.score)[0];
             const isKnown = known.includes(main);
-
-            if (isKnown) {
-                const name = [main.last_name, main.first_name].filter(Boolean).join(' ') || '—';
-                setObjField('objName', name);
-                els.objName.className = 'value status-known';
-                els.objBadge.textContent = 'опознан';
-
-                // Фото — маленькая превьюшка
-                if (main.photo) {
-                    els.objPhoto.innerHTML =
-                        `<img src="${main.photo}" alt="фото" style="max-height:80px;border-radius:4px;">`;
-                } else {
-                    els.objPhoto.textContent = '—';
-                }
-
-                // Telegram
-                if (main.telegram_link) {
-                    els.objTelegram.innerHTML =
-                        `<a href="${main.telegram_link}" target="_blank" rel="noopener">${main.telegram_link}</a>`;
-                } else if (main.username) {
-                    els.objTelegram.innerHTML =
-                        `<a href="https://t.me/${main.username}" target="_blank" rel="noopener">@${main.username}</a>`;
-                } else {
-                    els.objTelegram.textContent = '—';
-                }
-
-                setObjField('objPhone', main.phone_number || '—');
-            } else {
-                setObjField('objName', 'Неизвестный');
-                els.objName.className = 'value status-unknown';
-                els.objBadge.textContent = 'не опознан';
-                setObjField('objPhoto', '—');
-                setObjField('objTelegram', '—');
-                setObjField('objPhone', '—');
-            }
-
-            setObjField('objGender', main.gender);
-            setObjField('objAge', main.age);
-            setObjField('objConfidence', (main.score * 100).toFixed(1) + '%');
-            setObjField('objTime', new Date().toLocaleTimeString());
+            renderObjectInfoFromFace(main, isKnown);
         }
 
         function setObjField(id, value) {

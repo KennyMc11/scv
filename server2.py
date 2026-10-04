@@ -33,6 +33,9 @@ import json
 from insightface.app import FaceAnalysis
 from fa import find_same_emb
 from db import get_user, get_photo
+from store import KnownFacesStore
+
+faces_store = KnownFacesStore(max_items=10, ttl_sec=300.0)
 
 ort.set_default_logger_severity(0)
 
@@ -93,6 +96,7 @@ def process_frame(frame):
         for u in user_rows:
             known.append({
                 **base,
+                "id": u["id"],
                 "id_tg": u["id_tg"],
                 "first_name": u["first_name"],
                 "last_name": u["last_name"],
@@ -102,14 +106,17 @@ def process_frame(frame):
                 "photo": photo_path,
             })
 
-    return image_b64, known, unknown
+    faces_store.update(known)
+    known_all = faces_store.snapshot()
+
+    return image_b64, known, unknown, known_all
 
 
 async def stream(websocket):
     """WebSocket-обработчик."""
-    cap = cv2.VideoCapture("rtsp://localhost:8554/my_camera", cv2.CAP_FFMPEG)
-    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-    #cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+    #cap = cv2.VideoCapture("rtsp://localhost:8554/my_camera", cv2.CAP_FFMPEG)
+    #cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+    cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
     if not cap.isOpened():
         await websocket.send(json.dumps({
             "type": "error",
@@ -119,8 +126,6 @@ async def stream(websocket):
 
     try:
         while True:
-            # Блокирующее чтение + обработку уводим в отдельный поток,
-            # чтобы не блокировать event loop.
             ret, frame = await asyncio.to_thread(cap.read)
             if not ret:
                 await websocket.send(json.dumps({
@@ -129,7 +134,7 @@ async def stream(websocket):
                 }))
                 break
 
-            image_b64, known, unknown = await asyncio.to_thread(process_frame, frame)
+            image_b64, known, unknown, known_all = await asyncio.to_thread(process_frame, frame)
 
             if image_b64 is not None:
                 await websocket.send(json.dumps({
@@ -137,6 +142,7 @@ async def stream(websocket):
                     "image": f"data:image/jpeg;base64,{image_b64}",
                     "faces_known": known,
                     "faces_unknown": unknown,
+                    "faces_known_all": known_all,# накопленные на сервере
                 }))
 
             # Небольшая пауза, чтобы не забивать сеть

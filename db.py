@@ -82,7 +82,11 @@ def add_user(
 
 def get_user(user_id):
     with get_conn() as conn:
-        cur = conn.execute("SELECT id_tg, first_name, last_name, username, phone_number, telegram_link FROM users WHERE id = ?", (user_id,))
+        cur = conn.execute(
+            "SELECT id, id_tg, first_name, last_name, username, phone_number, telegram_link "
+            "FROM users WHERE id = ?",
+            (user_id,),
+        )
         return cur.fetchall()
 
 
